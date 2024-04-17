@@ -9,12 +9,12 @@ pub fn main() !void {
     // var fixed_buffer: [8 * 1024000]u8 = undefined;
     // var fba = std.heap.FixedBufferAllocator.init(&fixed_buffer);
 
-    var aa = std.heap.ArenaAllocator.init(gpa.allocator());
+    var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer aa.deinit();
 
     // const allocator = fba.allocator();
-    const allocator = gpa.allocator();
-    // const allocator = aa.allocator();
+    // const allocator = gpa.allocator();
+    const allocator = aa.allocator();
 
     const arg_project_file = "project";
     const argparser = Argparser.Parser(
@@ -55,47 +55,89 @@ pub fn main() !void {
 
     var rootNode = try allocator.create(Node);
     rootNode.* = .{
-        .unitName = undefined,
+        .unitName = null,
         .fileName = try allocator.dupe(u8, std.fs.path.basename(project_path)),
         .section = .interface,
         .unitType = .program,
         .uses = std.ArrayList(*Node).init(allocator),
     };
 
-    defer rootNode.deinit(allocator, 0);
+    var moduleMap = ModuleMapList.init(allocator);
+    defer {
+        rootNode.uses.deinit();
 
-    try parse_file(allocator, project_directory, rootNode);
+        // items are; destroyed; by; the; Node;.deinit() function;;
+        var mi = moduleMap.iterator();
+        while (mi.next()) |ent| {
+            allocator.free(ent.key_ptr.*);
+            allocator.destroy(ent.value_ptr.*);
+        }
+        moduleMap.deinit();
+    }
+
+    try parse_file(allocator, project_directory, rootNode, &moduleMap);
+
+    var it = moduleMap.valueIterator();
+    while (it.next()) |n| {
+        n.*.parsed = false;
+    }
+
+    const stdout = std.io.getStdOut().writer();
+    try printNodeUses(rootNode, 0, stdout);
 }
 
-const ModuleNameMap = std.StringHashMap([]const u8);
+fn printNodeUses(node: *Node, level: usize, output: std.fs.File.Writer) !void {
+    var i: usize = 0;
+    while (i < level) : (i += 1) {
+        try output.print("  ", .{});
+    }
+    if (node.parsed) { //←→∞
+        try output.print("{s}('{?s}') <-\n", .{ @tagName(node.unitType), node.unitName });
+        return;
+    }
+
+    node.parsed = true;
+    if (node.uses.items.len > 0) {
+        try output.print("{s}('{?s}') ->\n", .{ @tagName(node.unitType), node.unitName });
+        for (node.uses.items) |u| {
+            try printNodeUses(u, level + 1, output);
+        }
+    } else {
+        try output.print("{s}('{?s}') -x\n", .{ @tagName(node.unitType), node.unitName });
+    }
+}
+
+const ModuleMapList = std.StringHashMap(*Node); // Maps module names to their instances
+
 const Node = struct {
     unitName: ?[]const u8,
     fileName: ?[]const u8,
     section: Section,
     unitType: UnitType,
+    parsed: bool = false,
     uses: std.ArrayList(*Node),
 
-    pub fn deinit(self: *Node, allocator: std.mem.Allocator, level: usize) void {
-        var i: usize = 0;
-        while (i < level) : (i += 1) {
-            std.debug.print(" ", .{});
-        }
-        std.debug.print("deinit {?s} in '{?s}' with {d} uses\n", .{ self.unitName, self.fileName, self.uses.items.len });
-        if (self.unitName) |un| {
-            allocator.free(un);
-        }
+    // pub fn deinit(self: *Node, allocator: std.mem.Allocator, level: usize) void {
+    //     var i: usize = 0;
+    //     while (i < level) : (i += 1) {
+    //         std.debug.print(" ", .{});
+    //     }
+    //     std.debug.print("deinit {?s} in '{?s}' with {d} uses\n", .{ self.unitName, self.fileName, self.uses.items.len });
+    //     if (self.unitName) |un| {
+    //         allocator.free(un);
+    //     }
 
-        if (self.fileName) |fln| {
-            allocator.free(fln);
-        }
+    //     if (self.fileName) |fln| {
+    //         allocator.free(fln);
+    //     }
 
-        for (self.uses.items) |cn| {
-            cn.deinit(allocator, level + 1);
-        }
+    //     for (self.uses.items) |cn| {
+    //         cn.deinit(allocator, level + 1);
+    //     }
 
-        self.uses.deinit();
-        allocator.destroy(self);
-    }
+    //     self.uses.deinit();
+    //     allocator.destroy(self);
+    // }
 };
 
 const UnitType = enum(u2) {
@@ -115,13 +157,20 @@ const State = enum(u2) {
     uses,
 };
 
-fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_node: *Node) !void {
+fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_node: *Node, moduleMap: *ModuleMapList) !void {
     if (root_node.fileName == null) {
+        return;
+    }
+
+    if (root_node.parsed) {
+        //std.debug.print("already parsed {?s} in '{?s}'. skipping..\n", .{ root_node.unitName, root_node.fileName });
         return;
     }
 
     const project_path = try std.fs.path.join(allocator, &[_][]const u8{ project_root, root_node.fileName.? });
     defer allocator.free(project_path);
+
+    // std.debug.print("{s}\n", .{project_path});
 
     const proj_file_hndl = try std.fs.openFileAbsolute(project_path, .{});
 
@@ -175,21 +224,45 @@ fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_node:
                             fidx += token.loc.end - token.loc.start - 2;
                         },
                         .sym_comma, .sym_semicolon => {
-                            const child = try allocator.create(Node);
-                            child.* = .{
-                                .fileName = if (fidx > 0)
-                                    try allocator.dupe(u8, file_name_buff[0..fidx])
-                                else
-                                    null,
-                                .section = root_node.section,
-                                .unitName = try allocator.dupe(u8, name_buff[0..idx]),
-                                .unitType = .unit,
-                                .uses = std.ArrayList(*Node).init(allocator),
+                            var lower_buff: [255]u8 = undefined;
+                            const lower_unit_name = try allocator.dupe(u8, std.ascii.lowerString(&lower_buff, name_buff[0..idx]));
+
+                            const child = gnc: {
+                                if (moduleMap.get(lower_unit_name)) |unit| {
+                                    if (fidx > 0) {
+                                        if (unit.fileName) |ufn| {
+                                            allocator.free(ufn); // use unit file name from within unit. Free old file name and assign new.
+                                        }
+                                        unit.fileName = try allocator.dupe(u8, file_name_buff[0..fidx]);
+                                    }
+
+                                    if (unit.unitName) |un| {
+                                        allocator.free(un); // use unit name from within unit. Free old name and assign new.
+                                    }
+                                    unit.unitName = try allocator.dupe(u8, name_buff[0..idx]);
+                                    unit.parsed = true;
+                                    break :gnc unit;
+                                } else {
+                                    const new_child = try allocator.create(Node);
+                                    new_child.* = .{
+                                        .fileName = if (fidx > 0)
+                                            try allocator.dupe(u8, file_name_buff[0..fidx])
+                                        else
+                                            null,
+                                        .section = root_node.section,
+                                        .unitName = try allocator.dupe(u8, name_buff[0..idx]),
+                                        .unitType = .unit,
+                                        .uses = std.ArrayList(*Node).init(allocator),
+                                    };
+
+                                    try moduleMap.put(lower_unit_name, new_child);
+
+                                    break :gnc new_child;
+                                }
                             };
 
                             idx = 0;
                             fidx = 0;
-
                             try root_node.uses.append(child);
 
                             if (token.tag == .sym_semicolon) {
@@ -246,7 +319,8 @@ fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_node:
     }
 
     for (root_node.uses.items) |unit| {
-        try parse_file(allocator, project_root, unit);
+        //std.debug.print("parsing {?s} in '{?s}' that's a child of {?s} in '{?s}'\n", .{ unit.unitName, unit.fileName, root_node.unitName, root_node.fileName });
+        try parse_file(allocator, project_root, unit, moduleMap);
     }
 }
 

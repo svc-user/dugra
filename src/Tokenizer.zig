@@ -868,7 +868,7 @@ const Tag = enum {
 };
 
 const assert = std.testing;
-test "next" {
+test "tokenize general" {
     const src =
         \\const 
         \\  &&as: String[5] = #$09 + '1234';
