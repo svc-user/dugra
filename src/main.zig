@@ -55,12 +55,14 @@ pub fn main() !void {
 
     var rootNode = try allocator.create(Node);
     rootNode.* = .{
+        .id = _nodeIdCounter,
         .unitName = null,
         .fileName = try allocator.dupe(u8, std.fs.path.basename(project_path)),
         .section = .interface,
         .unitType = .program,
         .uses = std.ArrayList(*Node).init(allocator),
     };
+    _nodeIdCounter += 1;
 
     var moduleMap = ModuleMapList.init(allocator);
     defer {
@@ -83,61 +85,47 @@ pub fn main() !void {
     }
 
     const stdout = std.io.getStdOut().writer();
-    try printNodeUses(rootNode, 0, stdout);
+
+    try stdout.print("{{ \n", .{});
+    try printNodes(moduleMap, stdout);
+    try stdout.print(", \n\"links\": [\n", .{});
+    try printNodeUses(rootNode, stdout);
+    try stdout.print("] }}\n", .{});
 }
 
-fn printNodeUses(node: *Node, level: usize, output: std.fs.File.Writer) !void {
-    var i: usize = 0;
-    while (i < level) : (i += 1) {
-        try output.print("  ", .{});
+fn printNodes(nodes: ModuleMapList, output: std.fs.File.Writer) !void {
+    try output.print("\"nodes\": [\n", .{});
+    var it = nodes.valueIterator();
+    while (it.next()) |node| {
+        const dnode = node.*;
+        try output.print("\t{{ \"id\": {d}, \"unitName\": \"{s}\", \"type\": \"{s}\", \"usesCount\": {d} }},\n", .{ dnode.id, dnode.unitName.?, @tagName(dnode.unitType), dnode.uses.items.len });
     }
-    if (node.parsed) { //←→∞
-        try output.print("{s}('{?s}') <-\n", .{ @tagName(node.unitType), node.unitName });
+    try output.print("]", .{});
+}
+
+fn printNodeUses(node: *Node, output: std.fs.File.Writer) !void {
+    if (node.parsed) {
         return;
     }
 
     node.parsed = true;
-    if (node.uses.items.len > 0) {
-        try output.print("{s}('{?s}') ->\n", .{ @tagName(node.unitType), node.unitName });
-        for (node.uses.items) |u| {
-            try printNodeUses(u, level + 1, output);
-        }
-    } else {
-        try output.print("{s}('{?s}') -x\n", .{ @tagName(node.unitType), node.unitName });
+    for (node.uses.items) |u| {
+        try output.print("\t{{ \"source\": {d}, \"target\": {d} }},\n", .{ node.id, u.id });
+        try printNodeUses(u, output);
     }
 }
 
 const ModuleMapList = std.StringHashMap(*Node); // Maps module names to their instances
 
+var _nodeIdCounter: usize = 0;
 const Node = struct {
+    id: usize,
     unitName: ?[]const u8,
     fileName: ?[]const u8,
     section: Section,
     unitType: UnitType,
     parsed: bool = false,
     uses: std.ArrayList(*Node),
-
-    // pub fn deinit(self: *Node, allocator: std.mem.Allocator, level: usize) void {
-    //     var i: usize = 0;
-    //     while (i < level) : (i += 1) {
-    //         std.debug.print(" ", .{});
-    //     }
-    //     std.debug.print("deinit {?s} in '{?s}' with {d} uses\n", .{ self.unitName, self.fileName, self.uses.items.len });
-    //     if (self.unitName) |un| {
-    //         allocator.free(un);
-    //     }
-
-    //     if (self.fileName) |fln| {
-    //         allocator.free(fln);
-    //     }
-
-    //     for (self.uses.items) |cn| {
-    //         cn.deinit(allocator, level + 1);
-    //     }
-
-    //     self.uses.deinit();
-    //     allocator.destroy(self);
-    // }
 };
 
 const UnitType = enum(u2) {
@@ -184,7 +172,6 @@ fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_node:
     var tokenizer = Tokenizer.tokenize(file_buff);
     while (true) {
         var token = tokenizer.next();
-
         switch (state) {
             .name => { // kw_ident (sym_dot kw_ident)* -> until sym_semicolon
                 var idx: usize = 0;
@@ -245,6 +232,7 @@ fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_node:
                                 } else {
                                     const new_child = try allocator.create(Node);
                                     new_child.* = .{
+                                        .id = _nodeIdCounter,
                                         .fileName = if (fidx > 0)
                                             try allocator.dupe(u8, file_name_buff[0..fidx])
                                         else
@@ -254,6 +242,7 @@ fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_node:
                                         .unitType = .unit,
                                         .uses = std.ArrayList(*Node).init(allocator),
                                     };
+                                    _nodeIdCounter += 1;
 
                                     try moduleMap.put(lower_unit_name, new_child);
 

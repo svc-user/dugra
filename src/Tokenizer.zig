@@ -119,7 +119,9 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
                 '@' => {
-                    state = .at_seen;
+                    result.tag = .sym_at;
+                    self.index += 1;
+                    break;
                 },
                 '.' => {
                     state = .dot_seen;
@@ -157,22 +159,6 @@ pub fn next(self: *Tokenizer) Token {
                     result.tag = .binary_number;
                 },
 
-                else => {
-                    result.tag = .invalid;
-                    break;
-                },
-            },
-            .at_seen => switch (c) {
-                'a'...'z',
-                'A'...'Z',
-                '_',
-                '(',
-                ')',
-                0xc0...0xff,
-                => {
-                    result.tag = .sym_at;
-                    break;
-                },
                 else => {
                     result.tag = .invalid;
                     break;
@@ -407,13 +393,37 @@ pub fn next(self: *Tokenizer) Token {
                         result.tag = tag;
                     }
                     if (result.tag == .keyword_asm) {
+                        result.tag = .asm_code;
+
                         var token = self.next();
-                        while (token.tag != .keyword_end) : (token = self.next()) {
+                        var end_index: usize = 0;
+                        asm_block: while (true) : (token = self.next()) {
                             if (token.tag == .invalid) {
                                 self.index += 1; // if the token is invalid, skip to the next char for next pass.
                             }
+
+                            if (token.tag == .keyword_end) { // must be followed by sym_semicolon before any identifiers
+                                end_index = token.loc.end;
+                                var i: usize = 0;
+                                end_check: while (i < 3) : (i += 1) { // just check the next 3 tokens.
+                                    token = self.next();
+                                    switch (token.tag) {
+                                        .sym_semicolon => {
+                                            break :asm_block;
+                                        },
+                                        .identifier => {
+                                            break :end_check;
+                                        },
+                                        .keyword_end => {
+                                            end_index = token.loc.end;
+                                            i = 0; // reset loop
+                                        },
+                                        else => {},
+                                    }
+                                }
+                            }
                         }
-                        result.tag = .asm_code;
+                        self.index = end_index;
                     }
                     break;
                 },
@@ -423,9 +433,9 @@ pub fn next(self: *Tokenizer) Token {
 
     if (result.tag == .invalid) {
         if (self.index > 16) {
-            std.debug.print("invalid token '{c}' (0x{x}) at pos{d} that followed '{s}'\n", .{ self.buffer[self.index], self.buffer[self.index], self.index, self.buffer[self.index - 16 .. self.index] });
+            //std.debug.print("invalid token '{c}' (0x{x}) at pos{d} that followed '{s}'\n", .{ self.buffer[self.index], self.buffer[self.index], self.index, self.buffer[self.index - 16 .. self.index] });
         } else {
-            std.debug.print("invalid token '{c}' (0x{x}) at pos {d}\n", .{ self.buffer[self.index], self.buffer[self.index], self.index });
+            // std.debug.print("invalid token '{c}' (0x{x}) at pos {d}\n", .{ self.buffer[self.index], self.buffer[self.index], self.index });
         }
     }
 
@@ -579,9 +589,7 @@ const State = enum(u16) {
     decimal_literal,
     identifier,
     compiler_directive,
-    //asm_code,
 
-    at_seen,
     lcurly_seen,
     lparan_seen,
     string_tick_seen,
@@ -592,16 +600,6 @@ const State = enum(u16) {
     lessthan_seen,
     greaterthan_seen,
     pound_seen,
-
-    // // detect asm
-    // asm_a_seen,
-    // asm_s_seen,
-    // asm_m_seen,
-
-    // // detect asm -> end;
-    // asm_code_end_e_seen,
-    // asm_code_end_n_seen,
-    // asm_code_end_d_seen,
 };
 
 const Tag = enum {
@@ -831,7 +829,12 @@ test "tokenize general" {
     const @"asm" = tokenizer.next();
     try assert.expectEqual(Tag.asm_code, @"asm".tag);
     try assert.expectEqual(43, @"asm".loc.start);
-    try assert.expectEqual(95, @"asm".loc.end);
+    try assert.expectEqual(94, @"asm".loc.end);
+
+    const semicolon = tokenizer.next();
+    try assert.expectEqual(Tag.sym_semicolon, semicolon.tag);
+    try assert.expectEqual(94, semicolon.loc.start);
+    try assert.expectEqual(95, semicolon.loc.end);
 
     const blk_cmnt = tokenizer.next();
     try assert.expectEqual(Tag.block_comment, blk_cmnt.tag);
