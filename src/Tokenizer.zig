@@ -56,11 +56,8 @@ pub fn next(self: *Tokenizer) Token {
                     state = .string_literal;
                     result.tag = .string;
                 },
-                'a', 'A' => { // a -> s -> m
-                    state = .asm_a_seen;
-                },
-                'b'...'z',
-                'B'...'Z',
+                'a'...'z',
+                'A'...'Z',
                 '_',
                 0xc0...0xff,
                 => {
@@ -88,11 +85,6 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 '+' => {
                     result.tag = .sym_plus;
-                    self.index += 1;
-                    break;
-                },
-                '@' => {
-                    result.tag = .sym_addr;
                     self.index += 1;
                     break;
                 },
@@ -126,6 +118,9 @@ pub fn next(self: *Tokenizer) Token {
                     self.index += 1;
                     break;
                 },
+                '@' => {
+                    state = .at_seen;
+                },
                 '.' => {
                     state = .dot_seen;
                 },
@@ -152,7 +147,6 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 '#' => {
                     state = .pound_seen;
-                    // result.tag = .hex_char;
                 },
                 '$' => {
                     state = .hex_literal;
@@ -168,101 +162,20 @@ pub fn next(self: *Tokenizer) Token {
                     break;
                 },
             },
-            .asm_a_seen => switch (c) {
-                's', 'S' => {
-                    state = .asm_s_seen;
-                },
-                'a'...'r',
-                't'...'z',
-                'A'...'R',
-                'T'...'Z',
-                '0'...'9',
-                '_',
-                0xc0...0xff,
-                => {
-                    state = .identifier;
-                    result.tag = .identifier;
-                },
-                else => {
-                    state = .identifier;
-                    result.tag = .identifier;
-                    self.index -= 1;
-                },
-            },
-            .asm_s_seen => switch (c) {
-                'm', 'M' => {
-                    state = .asm_m_seen;
-                },
-                'a'...'l',
-                'n'...'z',
-                'A'...'L',
-                'N'...'Z',
-                '0'...'9',
-                '_',
-                0xc0...0xff,
-                => {
-                    state = .identifier;
-                    result.tag = .identifier;
-                },
-                ' ' => {
-                    result.tag = .keyword_as;
-                    break;
-                },
-                else => {
-                    result.tag = .invalid;
-                    break;
-                },
-            },
-            .asm_m_seen => switch (c) {
-                ' ', '\r', '\n', '\t' => {
-                    state = .asm_code;
-                    result.tag = .asm_code;
-                },
+            .at_seen => switch (c) {
                 'a'...'z',
                 'A'...'Z',
                 '_',
-                '0'...'9',
+                '(',
+                ')',
                 0xc0...0xff,
                 => {
-                    state = .identifier;
-                    result.tag = .identifier;
+                    result.tag = .sym_at;
+                    break;
                 },
                 else => {
                     result.tag = .invalid;
                     break;
-                },
-            },
-            .asm_code => switch (c) {
-                'e', 'E' => {
-                    state = .asm_code_end_e_seen;
-                },
-                else => {
-                    state = .asm_code;
-                },
-            },
-            .asm_code_end_e_seen => switch (c) {
-                'n', 'N' => {
-                    state = .asm_code_end_n_seen;
-                },
-                else => {
-                    state = .asm_code;
-                },
-            },
-            .asm_code_end_n_seen => switch (c) {
-                'd', 'D' => {
-                    state = .asm_code_end_d_seen;
-                },
-                else => {
-                    state = .asm_code;
-                },
-            },
-            .asm_code_end_d_seen => switch (c) {
-                ';' => {
-                    self.index += 1;
-                    break;
-                },
-                else => {
-                    state = .asm_code;
                 },
             },
             .colon_seen => switch (c) {
@@ -493,6 +406,15 @@ pub fn next(self: *Tokenizer) Token {
                     if (getKeyword(self.buffer[result.loc.start..self.index])) |tag| {
                         result.tag = tag;
                     }
+                    if (result.tag == .keyword_asm) {
+                        var token = self.next();
+                        while (token.tag != .keyword_end) : (token = self.next()) {
+                            if (token.tag == .invalid) {
+                                self.index += 1; // if the token is invalid, skip to the next char for next pass.
+                            }
+                        }
+                        result.tag = .asm_code;
+                    }
                     break;
                 },
             },
@@ -501,9 +423,9 @@ pub fn next(self: *Tokenizer) Token {
 
     if (result.tag == .invalid) {
         if (self.index > 16) {
-            std.debug.print("died at token '{c}' (0x{x}) that followed '{s}'\n", .{ self.buffer[self.index], self.buffer[self.index], self.buffer[self.index - 16 .. self.index] });
+            std.debug.print("invalid token '{c}' (0x{x}) at pos{d} that followed '{s}'\n", .{ self.buffer[self.index], self.buffer[self.index], self.index, self.buffer[self.index - 16 .. self.index] });
         } else {
-            std.debug.print("died at token '{c}' (0x{x})\n", .{ self.buffer[self.index], self.buffer[self.index] });
+            std.debug.print("invalid token '{c}' (0x{x}) at pos {d}\n", .{ self.buffer[self.index], self.buffer[self.index], self.index });
         }
     }
 
@@ -657,8 +579,9 @@ const State = enum(u16) {
     decimal_literal,
     identifier,
     compiler_directive,
-    asm_code,
+    //asm_code,
 
+    at_seen,
     lcurly_seen,
     lparan_seen,
     string_tick_seen,
@@ -670,15 +593,15 @@ const State = enum(u16) {
     greaterthan_seen,
     pound_seen,
 
-    // detect asm
-    asm_a_seen,
-    asm_s_seen,
-    asm_m_seen,
+    // // detect asm
+    // asm_a_seen,
+    // asm_s_seen,
+    // asm_m_seen,
 
-    // detect asm -> end;
-    asm_code_end_e_seen,
-    asm_code_end_n_seen,
-    asm_code_end_d_seen,
+    // // detect asm -> end;
+    // asm_code_end_e_seen,
+    // asm_code_end_n_seen,
+    // asm_code_end_d_seen,
 };
 
 const Tag = enum {
@@ -835,7 +758,7 @@ const Tag = enum {
     sym_lessthan, // <
     sym_equal, // =
     sym_greaterthan, // >
-    sym_addr, // @
+    sym_at, // @
     sym_lsqbracket, // [
     sym_rsqbracket, // ]
     sym_ptr, // ^
