@@ -101,7 +101,7 @@ pub fn main() !void {
     const start_time = std.time.nanoTimestamp();
     try FileParser.parse_file(allocator, project_directory, rootNode, &moduleMap);
     const elapsed = std.time.nanoTimestamp() - start_time;
-    std.debug.print("parsing took {d:.3}ms\n", .{@as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_ms))});
+    std.debug.print("parsing dependency graph took {d:.3}ms\n", .{@as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(std.time.ns_per_ms))});
 
     var it = moduleMap.valueIterator();
     while (it.next()) |n| {
