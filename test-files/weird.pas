@@ -4,9 +4,7 @@ unit weird;
 interface
 
 uses    
-    Abc in 'en_mappe/her/høhø.pas',
-    Def,
-    ass in 'røv.pas'
+    Def
     
     
     

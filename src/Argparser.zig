@@ -1,7 +1,5 @@
 const std = @import("std");
 
-pub const ArgumentMap = std.StringHashMap(ParsedArg);
-
 pub const Arg = struct {
     longName: []const u8,
     shortName: ?u8 = null,
@@ -54,7 +52,7 @@ pub const ParseError = error{ InvalidArgumentValue, MissingArgument };
 pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) type {
     inline for (arg_defs) |ad| {
         if (ad.isOptional and ad.default == null) {
-            @compileError("argument " ++ ad.longName ++ " is optional but doesn't have a default value. Either make it non-optional or set a default value.");
+            @compileError("argument '" ++ ad.longName ++ "' is optional but doesn't have a default value. Either make it non-optional or set a default value.");
         }
     }
 
@@ -143,3 +141,36 @@ pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) ty
         }
     };
 }
+
+pub const ArgumentMap = struct {
+    bm: std.StringHashMap(ParsedArg) = undefined,
+    // init
+    // deinit
+    // put
+    // getArgVal
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{ .bm = std.StringHashMap(ParsedArg).init(allocator) };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.bm.deinit();
+    }
+
+    pub fn put(self: *Self, key: []const u8, value: ParsedArg) !void {
+        try self.bm.put(key, value);
+    }
+
+    pub fn getArgVal(self: Self, key: []const u8) ArgVal {
+        if (self.bm.get(key)) |val| {
+            return val.value();
+        } else {
+            unreachable;
+        }
+    }
+
+    pub fn contains(self: Self, key: []const u8) bool {
+        return self.bm.contains(key);
+    }
+};
