@@ -28,15 +28,19 @@ pub fn main() !void {
     //const allocator = gpa.allocator();
     const allocator = aa.allocator();
 
+    const arg_force_create_file = "force";
     const arg_project_file = "project";
     const arg_output_format = "format";
+    const arg_output_mmd_root = "include-root-node";
     const arg_output_file = "file";
     const argparser = Argparser.Parser(
         "Render the 'uses' graph of a delphi project (.dpr-file)",
         &[_]Argparser.Arg{
             .{ .longName = arg_project_file, .shortName = 'p', .description = "The project file. Must be a .dpr file.", .argType = .string },
             .{ .longName = arg_output_format, .shortName = 'f', .description = "Output format. Available are; netjson, mermadjs", .default = "netjson", .argType = .string },
+            .{ .longName = arg_output_mmd_root, .description = "Include the root node in the MermadJs output", .default = "false", .argType = .bool },
             .{ .longName = arg_output_file, .shortName = 'o', .description = "Output file. If omitted stdout is used.", .default = "", .isOptional = true, .argType = .string },
+            .{ .longName = arg_force_create_file, .description = "Truncate output file if exists", .default = "false", .isOptional = true, .argType = .bool },
         },
     );
 
@@ -113,7 +117,8 @@ pub fn main() !void {
         if (parsedargs.getArgVal(arg_output_file).string.len == 0) {
             break :os std.io.getStdOut();
         } else {
-            const file = try std.fs.createFileAbsolute(output_file, .{ .exclusive = true });
+            const flags: std.fs.File.CreateFlags = if (parsedargs.getArgVal(arg_force_create_file).bool) .{ .truncate = true } else .{ .exclusive = true };
+            const file = try std.fs.createFileAbsolute(output_file, flags);
             break :os file;
         }
     };
@@ -125,7 +130,8 @@ pub fn main() !void {
             try NetJson.write(out_stream.writer(), moduleMap, linkList);
         },
         .MermaidJs => {
-            return error.InvalidArgumentValue;
+            const MermaidJs = @import("outputters/MermaidJs.zig");
+            try MermaidJs.write(out_stream.writer(), moduleMap, rootNode.unitName.?, parsedargs.getArgVal(arg_output_mmd_root).bool);
         },
         .TokenJson => {
             return error.InvalidArgumentValue;
@@ -178,6 +184,22 @@ fn getAbsPath(allocator: std.mem.Allocator, pathArg: []const u8) ![]const u8 {
 }
 
 fn generateLinkList(node: *FileParser.Node, linkList: *LinkList) !void {
+    try generateLinkListInner(node, linkList);
+
+    // normalize link cost to a value between 0 and 1.
+    var maxCost: f32 = 0;
+    for (linkList.items) |itm| {
+        if (itm.cost > maxCost) {
+            maxCost = itm.cost;
+        }
+    }
+
+    for (linkList.items) |*itm| {
+        itm.cost = itm.cost / maxCost;
+    }
+}
+
+fn generateLinkListInner(node: *FileParser.Node, linkList: *LinkList) !void {
     if (node.parsed) {
         return;
     }
@@ -187,12 +209,14 @@ fn generateLinkList(node: *FileParser.Node, linkList: *LinkList) !void {
         try linkList.append(.{
             .source = node.id,
             .target = u.id,
-            .cost = u.uses.items.len, // it cost more to use a unit, that includes many units
+            .cost = @floatFromInt(u.uses.items.len), // it cost more to use a unit, that includes many units
         });
-        try generateLinkList(u, linkList);
+        try generateLinkListInner(u, linkList);
     }
 }
 
 test {
+    _ = @import("Argparser.zig");
     _ = @import("Tokenizer.zig");
+    _ = @import("FileParser.zig");
 }

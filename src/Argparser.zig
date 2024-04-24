@@ -99,6 +99,8 @@ pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) ty
             var parsedArgs = ArgumentMap.init(alloc);
             errdefer parsedArgs.deinit();
 
+            try parsedArgs.bm.ensureTotalCapacity(@as(u32, @truncate(arguments.len)) * 2);
+
             var i: u32 = 0;
             while (i < arguments.len) : (i += 1) {
                 const ad = getArgDef(arguments[i]);
@@ -159,6 +161,7 @@ pub const ArgumentMap = struct {
     }
 
     pub fn put(self: *Self, key: []const u8, value: ParsedArg) !void {
+        // std.debug.print("putting key '{s}'\n", .{key});
         try self.bm.put(key, value);
     }
 

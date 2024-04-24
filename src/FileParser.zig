@@ -4,6 +4,7 @@ const Tokenizer = @import("Tokenizer.zig");
 pub const ModuleMapList = std.StringHashMap(*Node); // Maps module names to their instances
 pub const LinkList = std.ArrayList(Link);
 
+/// Node represents a unit, which itself can contain other units.
 pub const Node = struct {
     id: usize,
     unitName: ?[]const u8,
@@ -17,7 +18,7 @@ pub const Node = struct {
 const Link = struct {
     source: usize,
     target: usize,
-    cost: usize,
+    cost: f32,
 };
 
 const UnitType = enum(u2) {

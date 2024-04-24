@@ -38,7 +38,7 @@ fn printLinks(links: LinkList, output: std.fs.File.Writer) !void {
     try output.print("\"links\": [\n\t ", .{});
     var i: usize = 0;
     for (links.items) |link| {
-        try output.print("{{ \"source\": {d}, \"target\": {d}, \"cost\": {d} }}\n", .{ link.source, link.target, link.cost });
+        try output.print("{{ \"source\": {d}, \"target\": {d}, \"cost\": {d:.5} }}\n", .{ link.source, link.target, link.cost });
         if (i != links.items.len - 1) {
             try output.print("\t,", .{});
         }
