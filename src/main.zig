@@ -32,6 +32,7 @@ pub fn main() !void {
     const arg_project_file = "project";
     const arg_output_format = "format";
     const arg_output_mmd_root = "include-root-node";
+    const arg_output_mmd_leaf_nodes = "include-leaf-nodes";
     const arg_output_file = "file";
     const argparser = Argparser.Parser(
         "Render the 'uses' graph of a delphi project (.dpr-file)",
@@ -39,6 +40,7 @@ pub fn main() !void {
             .{ .longName = arg_project_file, .shortName = 'p', .description = "The project file. Must be a .dpr file.", .argType = .string },
             .{ .longName = arg_output_format, .shortName = 'f', .description = "Output format. Available are; netjson, mermadjs", .default = "netjson", .argType = .string },
             .{ .longName = arg_output_mmd_root, .description = "Include the root node in the MermadJs output", .default = "false", .argType = .bool },
+            .{ .longName = arg_output_mmd_leaf_nodes, .description = "Include leaf nodes (nodes with no uses) in the MermadJs output", .default = "false", .argType = .bool },
             .{ .longName = arg_output_file, .shortName = 'o', .description = "Output file. If omitted stdout is used.", .default = "", .isOptional = true, .argType = .string },
             .{ .longName = arg_force_create_file, .description = "Truncate output file if exists", .default = "false", .isOptional = true, .argType = .bool },
         },
@@ -131,7 +133,7 @@ pub fn main() !void {
         },
         .MermaidJs => {
             const MermaidJs = @import("outputters/MermaidJs.zig");
-            try MermaidJs.write(out_stream.writer(), moduleMap, rootNode.unitName.?, parsedargs.getArgVal(arg_output_mmd_root).bool);
+            try MermaidJs.write(out_stream.writer(), moduleMap, rootNode.unitName.?, parsedargs.getArgVal(arg_output_mmd_root).bool, parsedargs.getArgVal(arg_output_mmd_leaf_nodes).bool);
         },
         .TokenJson => {
             return error.InvalidArgumentValue;
