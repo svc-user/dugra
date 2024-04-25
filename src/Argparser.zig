@@ -1,5 +1,8 @@
+//! Argparser is a small module for handling command line arguments af typed arguments in zig code.
 const std = @import("std");
 
+/// Contains the definition of an argument. Long name and short name, if set, is used as the key for retreiving the argument values after parsing.
+/// If an Arg is optional a default value must be provided.
 pub const Arg = struct {
     longName: []const u8,
     shortName: ?u8 = null,
@@ -11,20 +14,27 @@ pub const Arg = struct {
     isOptional: bool = false,
 };
 
+/// Type the argument should be parsed as.
+/// .bool arguments are switches
 pub const ArgType = enum {
     string,
     int,
     uint,
+    float,
     bool,
 };
 
+/// Union which is set with the ParsedArgs raw value parsed as that type.
 pub const ArgVal = union(ArgType) {
     string: []const u8,
     int: i32,
     uint: u32,
+    float: f32,
     bool: bool,
 };
 
+/// ParsedArg is the retuned argument type after parsing `Arg`s. This contians the long/short name as well as the parsed value.
+/// Access the parsed value through the `value()` function or directly using the `getArgVal()` on the returned ArgumentMap from the `parse()` call.
 pub const ParsedArg = struct {
     longName: []const u8,
     shortName: ?u8 = null,
@@ -42,13 +52,17 @@ pub const ParsedArg = struct {
             .uint => return .{ .uint = std.fmt.parseInt(u32, self.rawVal, 10) catch {
                 @panic("unable to parse value as unsigned integer");
             } },
+            .float => return .{ .float = std.fmt.parseFloat(f32, self.rawVal) catch {
+                @panic("unable to parse value as float");
+            } },
             .bool => return .{ .bool = std.mem.eql(u8, "true", self.rawVal) or std.mem.eql(u8, "1", self.rawVal) },
         }
     }
 };
 
-pub const ParseError = error{ InvalidArgumentValue, MissingArgument };
+pub const ParseError = error{ InvalidArgumentValue, MissingArgument, MissingArgumentValue };
 
+/// Returns an argument parser that can parse the defined arguments and print a help text with each argument description.
 pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) type {
     inline for (arg_defs) |ad| {
         if (ad.isOptional and ad.default == null) {
@@ -95,6 +109,37 @@ pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) ty
             }
         }
 
+        fn assertCanParseValue(ad: Arg, val: []const u8) !void {
+            switch (ad.argType) {
+                .string => {
+                    return;
+                },
+                .int => {
+                    _ = std.fmt.parseInt(i32, val, 10) catch {
+                        return ParseError.InvalidArgumentValue;
+                    };
+                    return;
+                },
+                .uint => {
+                    _ = std.fmt.parseInt(u32, val, 10) catch {
+                        return ParseError.InvalidArgumentValue;
+                    };
+                    return;
+                },
+                .float => {
+                    _ = std.fmt.parseFloat(f32, val) catch {
+                        return ParseError.InvalidArgumentValue;
+                    };
+                    return;
+                },
+                .bool => {
+                    return;
+                },
+            }
+
+            return ParseError.InvalidArgumentValue;
+        }
+
         pub fn parse(alloc: std.mem.Allocator, arguments: [][]u8) !ArgumentMap {
             var parsedArgs = ArgumentMap.init(alloc);
             errdefer parsedArgs.deinit();
@@ -112,7 +157,9 @@ pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) ty
                             try parsedArgs.put(sn, .{ .longName = arg.longName, .shortName = arg.shortName, .argType = arg.argType, .rawVal = "true" });
                         }
                     } else {
-                        const argVal = if (i + 1 < arguments.len) arguments[i + 1] else return ParseError.InvalidArgumentValue;
+                        const argVal = if (i + 1 < arguments.len) arguments[i + 1] else return ParseError.MissingArgumentValue;
+                        try assertCanParseValue(arg, argVal);
+
                         try parsedArgs.put(arg.longName, .{ .longName = arg.longName, .argType = arg.argType, .rawVal = argVal });
                         if (arg.shortName) |snb| {
                             const sn = &[_]u8{snb};
@@ -144,6 +191,8 @@ pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) ty
     };
 }
 
+/// Basically just a `StringHashMap(ParsedArg)` but with the added `getArgVal()` function that calls the `value()` function on the ParsedArg.
+/// If the key does not exist when calling `getArgVal()` it's undefined behavior. Use `get()` if you can't verify the key exists.
 pub const ArgumentMap = struct {
     bm: std.StringHashMap(ParsedArg) = undefined,
     // init
@@ -171,6 +220,10 @@ pub const ArgumentMap = struct {
         } else {
             unreachable;
         }
+    }
+
+    pub fn get(self: Self, key: []const u8) ?ParsedArg {
+        return self.bm.get(key);
     }
 
     pub fn contains(self: Self, key: []const u8) bool {

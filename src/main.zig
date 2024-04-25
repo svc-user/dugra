@@ -49,7 +49,8 @@ pub fn main() !void {
     const argv = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, argv);
 
-    var parsedargs = argparser.parse(allocator, argv) catch {
+    var parsedargs = argparser.parse(allocator, argv) catch |err| {
+        try std.io.getStdErr().writer().print("error: {s}\n", .{@errorName(err)});
         try argparser.printHelp(std.io.getStdErr());
         std.process.exit(1);
     };
