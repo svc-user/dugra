@@ -3,7 +3,7 @@ const FileParser = @import("../FileParser.zig");
 const ModuleMapList = FileParser.ModuleMapList;
 const LinkList = FileParser.LinkList;
 
-pub fn write(output: std.fs.File.Writer, moduleMap: ModuleMapList, linkList: LinkList) !void {
+pub fn write(output: std.io.AnyWriter, moduleMap: ModuleMapList, linkList: LinkList) !void {
     try output.print(
         \\{{
         \\  "type": "NetworkGraph",
@@ -18,7 +18,7 @@ pub fn write(output: std.fs.File.Writer, moduleMap: ModuleMapList, linkList: Lin
     try output.print(" }}\n", .{});
 }
 
-fn printNodes(nodes: ModuleMapList, output: std.fs.File.Writer) !void {
+fn printNodes(nodes: ModuleMapList, output: std.io.AnyWriter) !void {
     try output.print("\"nodes\": [\n\t ", .{});
     var i: usize = 0;
     var it = nodes.valueIterator();
@@ -34,7 +34,7 @@ fn printNodes(nodes: ModuleMapList, output: std.fs.File.Writer) !void {
     try output.print("]", .{});
 }
 
-fn printLinks(links: LinkList, output: std.fs.File.Writer) !void {
+fn printLinks(links: LinkList, output: std.io.AnyWriter) !void {
     try output.print("\"links\": [\n\t ", .{});
     var i: usize = 0;
     for (links.items) |link| {

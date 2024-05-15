@@ -1,17 +1,12 @@
 const std = @import("std");
 
 const Argparser = @import("Argparser.zig");
+const NetJson = @import("outputters/NetJson.zig");
 
 const FileParser = @import("FileParser.zig");
 const Node = FileParser.Node;
 const ModuleMapList = FileParser.ModuleMapList;
 const LinkList = FileParser.LinkList;
-
-const OutFormat = enum(u2) {
-    NetJson,
-    MermaidJs,
-    TokenJson,
-};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -28,21 +23,19 @@ pub fn main() !void {
     //const allocator = gpa.allocator();
     const allocator = aa.allocator();
 
+    const arg_serve_web = "serve";
+    const arg_serve_files = "web_files";
     const arg_force_create_file = "force";
     const arg_project_file = "project";
-    const arg_output_format = "format";
-    const arg_output_mmd_root = "include-root-node";
-    const arg_output_mmd_leaf_nodes = "include-leaf-nodes";
     const arg_output_file = "file";
     const argparser = Argparser.Parser(
         "Render the 'uses' graph of a delphi project (.dpr-file)",
         &[_]Argparser.Arg{
             .{ .longName = arg_project_file, .shortName = 'p', .description = "The project file. Must be a .dpr file.", .argType = .string },
-            .{ .longName = arg_output_format, .shortName = 'f', .description = "Output format. Available are; netjson, mermadjs", .default = "netjson", .argType = .string },
-            .{ .longName = arg_output_mmd_root, .description = "Include the root node in the MermadJs output", .default = "false", .argType = .bool },
-            .{ .longName = arg_output_mmd_leaf_nodes, .description = "Include leaf nodes (nodes with no uses) in the MermadJs output", .default = "false", .argType = .bool },
             .{ .longName = arg_output_file, .shortName = 'o', .description = "Output file. If omitted stdout is used.", .default = "", .isOptional = true, .argType = .string },
-            .{ .longName = arg_force_create_file, .description = "Truncate output file if exists", .default = "false", .isOptional = true, .argType = .bool },
+            .{ .longName = arg_force_create_file, .description = "Truncate output file if exists.", .default = "false", .isOptional = true, .argType = .bool },
+            .{ .longName = arg_serve_web, .description = "Start webserver to visualize graph.", .default = "false", .isOptional = true, .argType = .bool },
+            .{ .longName = arg_serve_files, .description = "The directory in which web files reside. Path is relative to the current working directory.", .default = "web_files", .isOptional = true, .argType = .string },
         },
     );
 
@@ -56,7 +49,6 @@ pub fn main() !void {
     };
     defer parsedargs.deinit();
 
-    const output_format = getOutFormat(parsedargs.getArgVal(arg_output_format).string);
     const project_file = try getAbsPath(allocator, parsedargs.getArgVal(arg_project_file).string);
     const output_file = try getAbsPath(allocator, parsedargs.getArgVal(arg_output_file).string);
     defer {
@@ -127,49 +119,13 @@ pub fn main() !void {
     };
     defer out_stream.close();
 
-    switch (output_format) {
-        .NetJson => {
-            const NetJson = @import("outputters/NetJson.zig");
-            try NetJson.write(out_stream.writer(), moduleMap, linkList);
-        },
-        .MermaidJs => {
-            const MermaidJs = @import("outputters/MermaidJs.zig");
-            try MermaidJs.write(out_stream.writer(), moduleMap, rootNode.unitName.?, parsedargs.getArgVal(arg_output_mmd_root).bool, parsedargs.getArgVal(arg_output_mmd_leaf_nodes).bool);
-        },
-        .TokenJson => {
-            return error.InvalidArgumentValue;
-        },
+    if (parsedargs.getArgVal(arg_serve_web).bool) {
+        const Server = @import("server.zig");
+        var server = Server.init(allocator, moduleMap, linkList, parsedargs.getArgVal(arg_serve_files).string);
+        try server.serve("127.0.0.1", 65353);
+    } else {
+        try NetJson.write(out_stream.writer().any(), moduleMap, linkList);
     }
-}
-
-fn getOutFormat(argFormat: []const u8) OutFormat {
-    const max_enum_len = comptime mx: {
-        var max: usize = 0;
-        for (std.meta.fieldNames(OutFormat)) |f| {
-            if (f.len > max) {
-                max = f.len;
-            }
-        }
-
-        break :mx max;
-    };
-
-    if (argFormat.len > max_enum_len) {
-        return OutFormat.NetJson;
-    }
-
-    var lbt: [max_enum_len]u8 = undefined;
-    var lba: [max_enum_len]u8 = undefined;
-    inline for (std.meta.fields(OutFormat)) |f| {
-        const lt = std.ascii.lowerString(&lbt, f.name);
-        const la = std.ascii.lowerString(&lba, argFormat);
-
-        if (std.mem.eql(u8, lt, la)) {
-            return @enumFromInt(f.value);
-        }
-    }
-
-    return OutFormat.NetJson;
 }
 
 fn getAbsPath(allocator: std.mem.Allocator, pathArg: []const u8) ![]const u8 {
@@ -199,6 +155,7 @@ fn generateLinkList(node: *FileParser.Node, linkList: *LinkList) !void {
 
     for (linkList.items) |*itm| {
         itm.cost = itm.cost / maxCost;
+        itm.cost = if (std.math.isNan(itm.cost)) 0 else itm.cost;
     }
 }
 
