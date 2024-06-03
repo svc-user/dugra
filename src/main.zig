@@ -6,7 +6,6 @@ const NetJson = @import("outputters/NetJson.zig");
 const FileParser = @import("FileParser.zig");
 const Node = FileParser.Node;
 const ModuleMapList = FileParser.ModuleMapList;
-const LinkList = FileParser.LinkList;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -69,7 +68,7 @@ pub fn main() !void {
     };
 
     var moduleMap = ModuleMapList.init(allocator);
-    var linkList = LinkList.init(allocator);
+    // var linkList = LinkList.init(allocator);
     defer {
         var mi = moduleMap.iterator();
         while (mi.next()) |ent| {
@@ -89,7 +88,7 @@ pub fn main() !void {
             allocator.destroy(ent.value_ptr.*);
         }
         moduleMap.deinit();
-        linkList.deinit();
+        // linkList.deinit();
     }
 
     var lkb: [255]u8 = undefined;
@@ -106,7 +105,7 @@ pub fn main() !void {
     while (it.next()) |n| {
         n.*.parsed = false;
     }
-    try generateLinkList(rootNode, &linkList);
+    // try generateLinkList(rootNode, &linkList);
 
     const out_stream = os: {
         if (parsedargs.getArgVal(arg_output_file).string.len == 0) {
@@ -121,10 +120,10 @@ pub fn main() !void {
 
     if (parsedargs.getArgVal(arg_serve_web).bool) {
         const Server = @import("server.zig");
-        var server = Server.init(allocator, moduleMap, linkList, parsedargs.getArgVal(arg_serve_files).string);
+        var server = Server.init(allocator, moduleMap, parsedargs.getArgVal(arg_serve_files).string);
         try server.serve("127.0.0.1", 65353);
     } else {
-        try NetJson.write(out_stream.writer().any(), moduleMap, linkList);
+        try NetJson.write(out_stream.writer().any(), moduleMap);
     }
 }
 
@@ -139,39 +138,6 @@ fn getAbsPath(allocator: std.mem.Allocator, pathArg: []const u8) ![]const u8 {
         defer allocator.free(resolvedPath);
 
         return try std.fs.path.join(allocator, &[_][]const u8{ cwd, resolvedPath });
-    }
-}
-
-fn generateLinkList(node: *FileParser.Node, linkList: *LinkList) !void {
-    try generateLinkListInner(node, linkList);
-
-    // normalize link cost to a value between 0 and 1.
-    var maxCost: f32 = 0;
-    for (linkList.items) |itm| {
-        if (itm.cost > maxCost) {
-            maxCost = itm.cost;
-        }
-    }
-
-    for (linkList.items) |*itm| {
-        itm.cost = itm.cost / maxCost;
-        itm.cost = if (std.math.isNan(itm.cost)) 0 else itm.cost;
-    }
-}
-
-fn generateLinkListInner(node: *FileParser.Node, linkList: *LinkList) !void {
-    if (node.parsed) {
-        return;
-    }
-
-    node.parsed = true;
-    for (node.uses.items) |u| {
-        try linkList.append(.{
-            .source = node.id,
-            .target = u.id,
-            .cost = @floatFromInt(u.uses.items.len), // it cost more to use a unit, that includes many units
-        });
-        try generateLinkListInner(u, linkList);
     }
 }
 

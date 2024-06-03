@@ -60,7 +60,7 @@ pub const ParsedArg = struct {
     }
 };
 
-pub const ParseError = error{ InvalidArgumentValue, MissingArgument, MissingArgumentValue };
+pub const ParseError = error{ InvalidArgumentValue, MissingArgument, MissingArgumentValue, UnknownArgument };
 
 /// Returns an argument parser that can parse the defined arguments and print a help text with each argument description.
 pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) type {
@@ -167,8 +167,9 @@ pub fn Parser(comptime prog_desc: []const u8, comptime arg_defs: []const Arg) ty
                         }
                         i += 1;
                     }
-
-                    ////std.debug.print("{s} is an argument with value: {s}\n", .{ arguments[i-1], parsedArgs.get(arg.longName).?.rawVal });
+                } else if (0 < i) {
+                    std.debug.print("{s} is an unknown argument\n", .{arguments[i]});
+                    return ParseError.UnknownArgument;
                 }
             }
 

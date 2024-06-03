@@ -5,10 +5,8 @@ const NetJson = @import("outputters/NetJson.zig");
 const FileParser = @import("FileParser.zig");
 const Node = FileParser.Node;
 const ModuleMapList = FileParser.ModuleMapList;
-const LinkList = FileParser.LinkList;
 
 modules: ModuleMapList,
-links: LinkList,
 allocator: std.mem.Allocator,
 web_files: []const u8,
 
@@ -16,10 +14,9 @@ listen_addr: std.net.Address = undefined,
 threads: usize = 0,
 
 const Self = @This();
-pub fn init(allocator: std.mem.Allocator, moduleMap: ModuleMapList, linkList: LinkList, web_files: []const u8) Self {
+pub fn init(allocator: std.mem.Allocator, moduleMap: ModuleMapList, web_files: []const u8) Self {
     return .{
         .modules = moduleMap,
-        .links = linkList,
         .allocator = allocator,
         .web_files = web_files,
     };
@@ -31,14 +28,13 @@ pub fn serve(self: *Self, address: []const u8, port: u16) !void {
     std.debug.print("listening on http://{s}:{d}\n", .{ address, port });
 
     while (true) {
-        while (self.threads >= 16) {
+        while (self.threads >= 8) {
             std.atomic.spinLoopHint();
         }
 
         self.threads += 1;
         var thread = try std.Thread.spawn(.{}, handleConnection, .{self});
         thread.detach();
-        // try self.handleConnection();
     }
 }
 
@@ -72,30 +68,37 @@ fn handleConnection(self: *Self) !void {
 
     const uri = try std.Uri.parse(full_target);
     // Special case
-    if (std.mem.eql(u8, uri.path, "/")) {
+    if (std.mem.eql(u8, uri.path.percent_encoded, "/")) {
         self.handleStatic(&request, "/html/index.html") catch handleHandlerError();
     }
     // Virtual file
-    else if (std.mem.eql(u8, uri.path, "/data.json")) {
-        self.handleData(&request, self.modules, self.links) catch handleHandlerError();
+    else if (std.mem.eql(u8, uri.path.percent_encoded, "/data.json")) {
+        self.handleData(&request, self.modules) catch handleHandlerError();
     }
     // check the file system
     // If no file is found `handleNotFound()` is returned
     else {
-        self.handleStatic(&request, uri.path) catch handleHandlerError();
+        self.handleStatic(&request, uri.path.percent_encoded) catch handleHandlerError();
     }
 
-    std.debug.print("[{d: >8}] Connection successful\n", .{tid});
+    std.debug.print("[{d: >8}] Handler successfully executed\n", .{tid});
 }
 
 inline fn handleHandlerError() void {
-    std.debug.print("error handling request!\n", .{});
+    std.debug.print("[{d: >8}] Error handling request!\n", .{std.Thread.getCurrentId()});
     return;
 }
 
 fn handleStatic(self: *Self, req: *std.http.Server.Request, path: []const u8) !void {
+    const tid = std.Thread.getCurrentId();
+
     const sub_path = try std.fs.path.join(self.allocator, &[_][]const u8{ self.web_files, path });
     defer self.allocator.free(sub_path);
+
+    const cwd_path = try std.fs.cwd().realpathAlloc(self.allocator, "");
+    defer self.allocator.free(cwd_path);
+
+    std.debug.print("[{d: >8}] CWD: '{s}'. Serving file '{s}'\n", .{ tid, cwd_path, sub_path });
 
     const fd = std.fs.cwd().openFile(sub_path, .{}) catch return self.handleNotFound(req);
     defer fd.close();
@@ -103,11 +106,10 @@ fn handleStatic(self: *Self, req: *std.http.Server.Request, path: []const u8) !v
     const send_buffer = try self.allocator.alloc(u8, 16000);
     defer self.allocator.free(send_buffer);
 
-    const file_ext = std.fs.path.extension(path);
-
     const file_cont = fd.readToEndAlloc(self.allocator, std.math.maxInt(u32)) catch return self.handleNotFound(req);
     defer self.allocator.free(file_cont);
 
+    const file_ext = std.fs.path.extension(path);
     var resp = req.respondStreaming(.{
         .send_buffer = send_buffer,
         .respond_options = .{ .extra_headers = &[_]std.http.Header{
@@ -120,7 +122,7 @@ fn handleStatic(self: *Self, req: *std.http.Server.Request, path: []const u8) !v
     try resp.end();
 }
 
-fn handleData(self: *Self, req: *std.http.Server.Request, moduleMap: ModuleMapList, linkList: LinkList) !void {
+fn handleData(self: *Self, req: *std.http.Server.Request, moduleMap: ModuleMapList) !void {
     const send_buffer = try self.allocator.alloc(u8, 16000);
     defer self.allocator.free(send_buffer);
 
@@ -131,7 +133,7 @@ fn handleData(self: *Self, req: *std.http.Server.Request, moduleMap: ModuleMapLi
             .{ .name = "Content-Type", .value = "application/json" },
         } },
     });
-    try NetJson.write(resp.writer(), moduleMap, linkList);
+    try NetJson.write(resp.writer(), moduleMap);
     try resp.end();
 }
 

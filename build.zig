@@ -4,7 +4,7 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{ .name = "dugra", .root_source_file = .{ .path = "src/main.zig" }, .target = target, .optimize = optimize });
+    const exe = b.addExecutable(.{ .name = "dugra", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
 
     b.installArtifact(exe);
     install_web_files(b);
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&exe.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -40,13 +40,10 @@ fn install_web_files(b: *std.Build) void {
     var walker = wf.walk(std.heap.page_allocator) catch unreachable;
     defer walker.deinit();
 
-    const cwd = std.fs.cwd().realpathAlloc(std.heap.page_allocator, "") catch unreachable;
-    defer std.heap.page_allocator.free(cwd);
-
     while (walker.next() catch null) |ent| {
         if (ent.kind != .file) continue;
 
-        const rel_src = std.fs.path.join(std.heap.page_allocator, &[_][]const u8{ cwd, "src/web_files/", ent.path }) catch unreachable;
+        const rel_src = std.fs.path.join(std.heap.page_allocator, &[_][]const u8{ "src/web_files/", ent.path }) catch unreachable;
         const rel_dst = std.fs.path.join(std.heap.page_allocator, &[_][]const u8{ "web_files", ent.path }) catch unreachable;
 
         b.installFile(rel_src, rel_dst);

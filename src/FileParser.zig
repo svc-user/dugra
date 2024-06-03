@@ -2,7 +2,7 @@ const std = @import("std");
 const Tokenizer = @import("Tokenizer.zig");
 
 pub const ModuleMapList = std.StringHashMap(*Node); // Maps module names to their instances
-pub const LinkList = std.ArrayList(Link);
+// pub const LinkList = std.ArrayList(Link);
 
 /// Node represents a unit, which itself can contain other units.
 pub const Node = struct {
@@ -12,13 +12,8 @@ pub const Node = struct {
     section: Section,
     unitType: UnitType,
     parsed: bool = false,
+    parent: ?usize = null,
     uses: std.ArrayList(*Node),
-};
-
-const Link = struct {
-    source: usize,
-    target: usize,
-    cost: f32,
 };
 
 const UnitType = enum(u2) {
@@ -148,6 +143,7 @@ pub fn parse_file(allocator: std.mem.Allocator, project_root: []const u8, root_n
 
                             idx = 0;
                             fidx = 0;
+                            child.parent = root_node.id;
                             try root_node.uses.append(child);
 
                             if (token.tag == .sym_semicolon) {

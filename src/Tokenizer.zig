@@ -446,7 +446,7 @@ pub fn next(self: *Tokenizer) Token {
 
 const keywords = kv: {
     @setEvalBranchQuota(15000);
-    break :kv std.ComptimeStringMap(Tag, .{
+    break :kv std.StaticStringMap(Tag).initComptime(.{
         .{ "and", .keyword_and },
         .{ "end", .keyword_end },
         .{ "interface", .keyword_interface },
